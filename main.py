@@ -44,7 +44,7 @@ main_kb.add(
     KeyboardButton("🗣 Озвучить текст"),
     KeyboardButton("🎧 Заменить голос"),
     KeyboardButton("📖 Инструкция"),
-    KeyboardButton("👤 Профиль")  # Добавляем кнопку Профиль
+    KeyboardButton("👤 Профиль")  # Кнопка Профиль
 )
 
 voice_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -80,7 +80,7 @@ def get_emotion_settings(text):
     if max(happy_count, sad_count, angry_count, warm_count) == 0:
         return 0.5, 0.75
 
-    mood = max([
+    mood = max([ 
         (happy_count, (0.3, 0.9)),
         (sad_count, (0.7, 0.5)),
         (angry_count, (0.8, 0.6)),
@@ -90,19 +90,19 @@ def get_emotion_settings(text):
     return mood
 
 instruction_text = (
-     "📖 Инструкция по использованию бота:\n\n"
-        "1. 🗣 *Озвучивание текста:*\n"
-        "   • Нажми кнопку \"🗣 Озвучить текст\".\n"
-        "   • Выбери голос (Олег, Денис, Аня, Вика).\n"
-        "   • Отправь текст (до 200 символов).\n"
-        "   • Добавляй смайлы для эмоций:\n"
-        "     😂🤣😄 — весёлый, 😢😭💔 — грустный, 😡🤬 — злой, 😊❤️🥰 — тёплый.\n\n"
-        "2. 🎧 *Замена голоса в голосовом сообщении:*\n"
-        "   • Нажми \"🎧 Заменить голос\".\n"
-        "   • Выбери голос.\n"
-        "   • Отправь голосовое (до 15 секунд).\n\n"
-        "❗️Если превысишь лимит, бот сообщит об этом.\n"
-    )
+    "📖 Инструкция по использованию бота:\n\n"
+    "1. 🗣 *Озвучивание текста:*\n"
+    "   • Нажми кнопку \"🗣 Озвучить текст\".\n"
+    "   • Выбери голос (Олег, Денис, Аня, Вика).\n"
+    "   • Отправь текст (до 200 символов).\n"
+    "   • Добавляй смайлы для эмоций:\n"
+    "     😂🤣😄 — весёлый, 😢😭💔 — грустный, 😡🤬 — злой, 😊❤️🥰 — тёплый.\n\n"
+    "2. 🎧 *Замена голоса в голосовом сообщении:*\n"
+    "   • Нажми \"🎧 Заменить голос\".\n"
+    "   • Выбери голос.\n"
+    "   • Отправь голосовое (до 15 секунд).\n\n"
+    "❗️Если превысишь лимит, бот сообщит об этом.\n"
+)
 
 # --- Функция для проверки длины текста ---
 def is_text_too_long(text):
@@ -180,7 +180,7 @@ async def handle_voice_choice(message: types.Message):
     selected_voice[message.from_user.id] = message.text
     await message.answer(f"Выбран голос: {message.text}. Отправь текст:", reply_markup=back_kb)
 
-@dp.message_handler(lambda msg: msg.text not in ["🗣 Озвучить текст", "🎧 Заменить голос", "⬅️ Назад", "Денис", "Олег", "Аня", "Вика", "📖 Инструкция"])
+@dp.message_handler(lambda msg: msg.text not in ["🗣 Озвучить текст", "🎧 Заменить голос", "⬅️ Назад", "Денис", "Олег", "Аня", "Вика", "📖 Инструкция", "👤 Профиль"])
 async def handle_text(message: types.Message):
     if is_text_too_long(message.text):
         await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 200 символов.")
@@ -230,51 +230,6 @@ async def handle_text(message: types.Message):
             await bot.send_voice(chat_id=message.chat.id, voice=f)
     else:
         await message.answer(f"Ошибка озвучивания: {response.status_code}")
-
-    await status.delete()
-
-@dp.message_handler(content_types=['voice'])
-async def handle_voice(message: types.Message):
-    voice = selected_voice.get(message.from_user.id)
-    if not voice:
-        await message.answer("Сначала выбери голос для замены.")
-        return
-
-    # Проверка длительности голосового сообщения
-    voice_duration = message.voice.duration  # Длительность в секундах
-    if is_voice_too_long(voice_duration):
-        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
-        return
-
-    status = await message.answer("⌛ Заменяю голос...")
-
-    file_info = await bot.get_file(message.voice.file_id)
-    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_info.file_path}"
-    voice_data = requests.get(file_url).content
-
-    headers = { 'xi-api-key': API_KEY }
-    files = { 'audio': ('voice_message.ogg', voice_data, 'audio/ogg') }
-
-    voice_map = {
-        "Денис": VOICE_ID_DENIS,
-        "Олег": VOICE_ID_OGE,
-        "Аня": VOICE_ID_ANYA,
-        "Вика": VOICE_ID_VIKA
-    }
-
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/speech-to-speech/{voice_map[voice]}",
-        headers=headers,
-        files=files
-    )
-
-    if response.status_code == 200:
-        with open('converted.mp3', 'wb') as f:
-            f.write(response.content)
-        with open('converted.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-    else:
-        await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
 
     await status.delete()
 
