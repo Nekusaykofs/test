@@ -1,8 +1,9 @@
 import os
 import requests
+import asyncio
 import psycopg2
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 from urllib.parse import urlparse
 
@@ -33,8 +34,8 @@ cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
-        free_voices INT DEFAULT 5,
-        paid_voices INT DEFAULT 0
+        free_used INT DEFAULT 0,
+        paid_balance INT DEFAULT 0
     )
 ''')
 conn.commit()
@@ -45,7 +46,7 @@ main_kb.add(
     KeyboardButton("🗣 Озвучить текст"),
     KeyboardButton("🎧 Заменить голос"),
     KeyboardButton("📖 Инструкция"),
-    KeyboardButton("👤 Профиль")
+    KeyboardButton("👤 Профиль")  # Добавлена кнопка "Профиль"
 )
 
 voice_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -81,7 +82,7 @@ def get_emotion_settings(text):
     if max(happy_count, sad_count, angry_count, warm_count) == 0:
         return 0.5, 0.75
 
-    mood = max([ 
+    mood = max([
         (happy_count, (0.3, 0.9)),
         (sad_count, (0.7, 0.5)),
         (angry_count, (0.8, 0.6)),
@@ -91,19 +92,19 @@ def get_emotion_settings(text):
     return mood
 
 instruction_text = (
-    "📖 Инструкция по использованию бота:\n\n"
-    "1. 🗣 *Озвучивание текста:*\n"
-    "   • Нажми кнопку \"🗣 Озвучить текст\".\n"
-    "   • Выбери голос (Олег, Денис, Аня, Вика).\n"
-    "   • Отправь текст (до 200 символов).\n"
-    "   • Добавляй смайлы для эмоций:\n"
-    "     😂🤣😄 — весёлый, 😢😭💔 — грустный, 😡🤬 — злой, 😊❤️🥰 — тёплый.\n\n"
-    "2. 🎧 *Замена голоса в голосовом сообщении:*\n"
-    "   • Нажми \"🎧 Заменить голос\".\n"
-    "   • Выбери голос.\n"
-    "   • Отправь голосовое (до 15 секунд).\n\n"
-    "❗️Если превысишь лимит, бот сообщит об этом.\n"
-)
+     "📖 Инструкция по использованию бота:\n\n"
+        "1. 🗣 *Озвучивание текста:*\n"
+        "   • Нажми кнопку \"🗣 Озвучить текст\".\n"
+        "   • Выбери голос (Олег, Денис, Аня, Вика).\n"
+        "   • Отправь текст (до 200 символов).\n"
+        "   • Добавляй смайлы для эмоций:\n"
+        "     😂🤣😄 — весёлый, 😢😭💔 — грустный, 😡🤬 — злой, 😊❤️🥰 — тёплый.\n\n"
+        "2. 🎧 *Замена голоса в голосовом сообщении:*\n"
+        "   • Нажми \"🎧 Заменить голос\".\n"
+        "   • Выбери голос.\n"
+        "   • Отправь голосовое (до 15 секунд).\n\n"
+        "❗️Если превысишь лимит, бот сообщит об этом.\n"
+    )
 
 # --- Функция для проверки длины текста ---
 def is_text_too_long(text):
@@ -183,6 +184,20 @@ async def handle_voice_choice(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text not in ["🗣 Озвучить текст", "🎧 Заменить голос", "⬅️ Назад", "Денис", "Олег", "Аня", "Вика", "📖 Инструкция"])
 async def handle_text(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_used, paid_balance FROM users WHERE id = %s", (user_id,))
+    free_used, paid_balance = cursor.fetchone()
+
+    if free_used < 5:
+        cursor.execute("UPDATE users SET free_used = free_used + 1 WHERE id = %s", (user_id,))
+        conn.commit()
+    elif paid_balance > 0:
+        cursor.execute("UPDATE users SET paid_balance = paid_balance - 1 WHERE id = %s", (user_id,))
+        conn.commit()
+    else:
+        await message.answer("❗ Вы использовали 5 бесплатных голосовок.\nПополните баланс, чтобы продолжить.", reply_markup=buy_kb)
+        return
+
     if is_text_too_long(message.text):
         await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 200 символов.")
         return
@@ -191,19 +206,6 @@ async def handle_text(message: types.Message):
     if not voice:
         await message.answer("Сначала выбери голос.")
         return
-
-    # Проверяем баланс бесплатных голосов
-    cursor.execute('SELECT free_voices FROM users WHERE id = %s', (message.from_user.id,))
-    free_voices = cursor.fetchone()[0]
-
-    if free_voices > 0:
-        # Используем бесплатное голосовое сообщение
-        cursor.execute('UPDATE users SET free_voices = free_voices - 1 WHERE id = %s', (message.from_user.id,))
-        conn.commit()
-        is_paid = False
-    else:
-        # Пользователь должен заплатить за дополнительное сообщение
-        is_paid = True
 
     text = message.text
     stability, similarity = get_emotion_settings(text)
@@ -231,25 +233,79 @@ async def handle_text(message: types.Message):
         "Вика": VOICE_ID_VIKA
     }
 
-    data["voice_id"] = voice_map.get(voice)
+    response = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_map[voice]}",
+        headers=headers,
+        json=data
+    )
 
-    try:
-        response = requests.post('https://api.elevenlabs.io/v1/text-to-speech', headers=headers, json=data)
-        audio_url = response.json()["audio_url"]
+    if response.status_code == 200:
+        with open('output.mp3', 'wb') as f:
+            f.write(response.content)
+        with open('output.mp3', 'rb') as f:
+            await bot.send_voice(chat_id=message.chat.id, voice=f)
+    else:
+        await message.answer(f"Ошибка озвучивания: {response.status_code}")
 
-        await status.delete()
+    await status.delete()
 
-        if is_paid:
-            # Добавить проверку на оплату
-            await message.answer("Ваши голосовые сообщения стали платными. Пожалуйста, пополните баланс.")
-            return
+@dp.message_handler(content_types=['voice'])
+async def handle_voice(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_used, paid_balance FROM users WHERE id = %s", (user_id,))
+    free_used, paid_balance = cursor.fetchone()
 
-        await message.answer("🎙 Ваше озвученное сообщение:", reply_markup=back_kb)
+    if free_used < 5:
+        cursor.execute("UPDATE users SET free_used = free_used + 1 WHERE id = %s", (user_id,))
+        conn.commit()
+    elif paid_balance > 0:
+        cursor.execute("UPDATE users SET paid_balance = paid_balance - 1 WHERE id = %s", (user_id,))
+        conn.commit()
+    else:
+        await message.answer("❗ Вы использовали 5 бесплатных голосовок.\nПополните баланс, чтобы продолжить.", reply_markup=buy_kb)
+        return
 
-    except Exception as e:
-        print(f"Ошибка: {e}")
-        await message.answer("Произошла ошибка при создании аудио.")
+    if is_voice_too_long(message.voice.duration):
+        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, отправьте голосовое до 15 секунд.")
+        return
 
-if __name__ == '__main__':
-    executor.start_polling(dp)
+    voice = selected_voice.get(user_id)
+    if not voice:
+        await message.answer("Сначала выбери голос.")
+        return
 
+    status = await message.answer("⌛ Меняю голос...")
+
+    headers = {
+        'xi-api-key': API_KEY,
+        'Content-Type': 'application/json'
+    }
+
+    data = {
+        'voice': voice,
+        'stability': 0.7,
+        'similarity_boost': 0.75
+    }
+
+    voice_map = {
+        "Денис": VOICE_ID_DENIS,
+        "Олег": VOICE_ID_OGE,
+        "Аня": VOICE_ID_ANYA,
+        "Вика": VOICE_ID_VIKA
+    }
+
+    response = requests.post(
+        f"https://api.elevenlabs.io/v1/voice-change/{voice_map[voice]}",
+        headers=headers,
+        json=data
+    )
+
+    if response.status_code == 200:
+        with open('output.mp3', 'wb') as f:
+            f.write(response.content)
+        with open('output.mp3', 'rb') as f:
+            await bot.send_voice(chat_id=message.chat.id, voice=f)
+    else:
+        await message.answer(f"Ошибка замены голоса: {response.status_code}")
+
+    await status.delete()
