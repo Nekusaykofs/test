@@ -34,7 +34,7 @@ cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
-        free_messages_count INT DEFAULT 0
+        voice_count INT DEFAULT 0  -- Добавляем поле для хранения количества голосовых сообщений
     )
 ''')
 conn.commit()
@@ -116,6 +116,15 @@ def is_text_too_long(text):
 def is_voice_too_long(voice_duration):
     return voice_duration > 15  # Ограничение на 15 секунд
 
+# --- Функция для обновления количества голосовых сообщений ---
+def increment_voice_count(user_id):
+    cursor.execute('''
+        UPDATE users 
+        SET voice_count = voice_count + 1 
+        WHERE id = %s
+    ''', (user_id,))
+    conn.commit()
+
 # --- Команды ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
@@ -123,13 +132,9 @@ async def start_cmd(message: types.Message):
     cursor.execute('INSERT INTO users (id) VALUES (%s) ON CONFLICT DO NOTHING', (user_id,))
     conn.commit()
 
-    # Инициализация счётчика для бесплатных сообщений
-    cursor.execute('SELECT free_messages_count FROM users WHERE id = %s', (user_id,))
-    free_messages_count = cursor.fetchone()[0]
-
     welcome = (
-        f"Добро пожаловать в бот 🎤🎧\n\n"
-        f"Ваше количество оставшихся бесплатных сообщений: {5 - free_messages_count}.\n"
+        "Добро пожаловать в бот 🎤🎧\n\n"
+        "Я умею озвучивать текст разными голосами и менять голос в сообщениях.\n"
         "Выбери действие ниже и попробуй! 😊"
     )
     await message.answer(welcome, reply_markup=main_kb)
@@ -182,19 +187,7 @@ async def instruction(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute('SELECT free_messages_count FROM users WHERE id = %s', (user_id,))
-    free_messages_count = cursor.fetchone()[0]
-
-    profile_info = (
-        f"Ваш ID: {user_id}\n"
-        f"Оставшиеся бесплатные сообщения: {5 - free_messages_count}\n\n"
-        "🎧 Пакеты:\n"
-        "5 голосовых сообщений — $0.39\n"
-        "20 голосовых сообщений — $1.3\n"
-        "50 голосовых сообщений — $2.9\n"
-        "Для оплаты напишите /pay"
-    )
-    await message.answer(profile_info, reply_markup=profile_kb)
+    await message.answer(f"Ваш ID: {user_id}", reply_markup=profile_kb)
 
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
@@ -207,16 +200,6 @@ async def handle_voice_choice(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text not in ["🗣 Озвучить текст", "🎧 Заменить голос", "⬅️ Назад", "Денис", "Олег", "Аня", "Вика", "📖 Инструкция", "👤 Профиль"])
 async def handle_text(message: types.Message):
-    user_id = message.from_user.id
-    cursor.execute('SELECT free_messages_count FROM users WHERE id = %s', (user_id,))
-    free_messages_count = cursor.fetchone()[0]
-    
-    if free_messages_count >= 5:
-        # Запросить оплату через CryptoBot или другой платёжный сервис
-        await message.answer("Вы исчерпали лимит бесплатных сообщений. Чтобы продолжить, пожалуйста, оплатите пакет.")
-        return
-
-    # Логика озвучивания
     if is_text_too_long(message.text):
         await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 200 символов.")
         return
@@ -263,10 +246,6 @@ async def handle_text(message: types.Message):
             f.write(response.content)
         with open('output.mp3', 'rb') as f:
             await bot.send_voice(chat_id=message.chat.id, voice=f)
-
-        # Обновление счётчика бесплатных сообщений
-        cursor.execute('UPDATE users SET free_messages_count = free_messages_count + 1 WHERE id = %s', (user_id,))
-        conn.commit()
     else:
         await message.answer(f"Ошибка озвучивания: {response.status_code}")
 
@@ -274,7 +253,8 @@ async def handle_text(message: types.Message):
 
 @dp.message_handler(content_types=['voice'])
 async def handle_voice(message: types.Message):
-    voice = selected_voice.get(message.from_user.id)
+    user_id = message.from_user.id
+    voice = selected_voice.get(user_id)
     if not voice:
         await message.answer("Сначала выбери голос для замены.")
         return
@@ -284,6 +264,9 @@ async def handle_voice(message: types.Message):
     if is_voice_too_long(voice_duration):
         await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
         return
+
+    # Обновляем количество использованных голосовых сообщений
+    increment_voice_count(user_id)
 
     status = await message.answer("⌛ Заменяю голос...")
 
