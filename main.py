@@ -31,14 +31,17 @@ conn = psycopg2.connect(
     port=url.port
 )
 cursor = conn.cursor()
+
+# Обновляем структуру таблицы
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
-        free_used INT DEFAULT 0,
-        paid_balance INT DEFAULT 0
+        free_used INTEGER DEFAULT 0,
+        paid_balance DECIMAL(10, 2) DEFAULT 0.00
     )
 ''')
 conn.commit()
+
 
 # --- Клавиатуры ---
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
