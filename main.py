@@ -177,6 +177,19 @@ async def instruction(message: types.Message):
 async def back_to_main(message: types.Message):
     await message.answer("Выбери действие:", reply_markup=main_kb)
 
+@dp.message_handler(lambda msg: msg.text == "👤 Профиль")  # Обработчик для кнопки "Профиль"
+async def profile(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_used, paid_balance FROM users WHERE id = %s", (user_id,))
+    free_used, paid_balance = cursor.fetchone()
+    profile_info = (
+        f"👤 Ваш профиль:\n"
+        f"✅ Бесплатных голосов: {5 - free_used}\n"
+        f"💳 Пополненный баланс: {paid_balance} голосов\n"
+        f"🎤 Использовано голосов: {free_used}"
+    )
+    await message.answer(profile_info, reply_markup=back_kb)
+
 @dp.message_handler(lambda msg: msg.text in ["Денис", "Олег", "Аня", "Вика"])
 async def handle_voice_choice(message: types.Message):
     selected_voice[message.from_user.id] = message.text
@@ -195,7 +208,7 @@ async def handle_text(message: types.Message):
         cursor.execute("UPDATE users SET paid_balance = paid_balance - 1 WHERE id = %s", (user_id,))
         conn.commit()
     else:
-        await message.answer("❗ Вы использовали 5 бесплатных голосовок.\nПополните баланс, чтобы продолжить.", reply_markup=buy_kb)
+        await message.answer("❗ Вы использовали 5 бесплатных голосовок.\nПополните баланс, чтобы продолжить.", reply_markup=back_kb)
         return
 
     if is_text_too_long(message.text):
@@ -262,7 +275,7 @@ async def handle_voice(message: types.Message):
         cursor.execute("UPDATE users SET paid_balance = paid_balance - 1 WHERE id = %s", (user_id,))
         conn.commit()
     else:
-        await message.answer("❗ Вы использовали 5 бесплатных голосовок.\nПополните баланс, чтобы продолжить.", reply_markup=buy_kb)
+        await message.answer("❗ Вы использовали 5 бесплатных голосовок.\nПополните баланс, чтобы продолжить.", reply_markup=back_kb)
         return
 
     if is_voice_too_long(message.voice.duration):
@@ -309,3 +322,7 @@ async def handle_voice(message: types.Message):
         await message.answer(f"Ошибка замены голоса: {response.status_code}")
 
     await status.delete()
+
+# --- Запуск ---
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
