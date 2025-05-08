@@ -1,6 +1,5 @@
 import os
 import requests
-import asyncio
 import psycopg2
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -253,3 +252,4 @@ async def handle_text(message: types.Message):
 
 if __name__ == '__main__':
     executor.start_polling(dp)
+
