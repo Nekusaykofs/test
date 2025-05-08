@@ -112,7 +112,11 @@ instruction_text = (
 def get_voice_count(user_id):
     cursor.execute("SELECT voice_count FROM users WHERE id = %s", (user_id,))
     result = cursor.fetchone()
-    return result[0] if result else 0
+    if result is None:
+        cursor.execute("INSERT INTO users (id) VALUES (%s)", (user_id,))
+        conn.commit()
+        return 0
+    return result[0]
 
 def increment_voice_count(user_id):
     cursor.execute("UPDATE users SET voice_count = voice_count + 1 WHERE id = %s", (user_id,))
@@ -121,12 +125,6 @@ def increment_voice_count(user_id):
 def is_limit_exceeded(user_id):
     return get_voice_count(user_id) >= 5
 
-# --- Функции ---
-def is_text_too_long(text):
-    return len(text) > 200
-
-def is_voice_too_long(voice_duration):
-    return voice_duration > 15
 
 # --- Команды ---
 @dp.message_handler(commands=['start'])
