@@ -44,7 +44,7 @@ main_kb.add(
     KeyboardButton("🗣 Озвучить текст"),
     KeyboardButton("🎧 Заменить голос"),
     KeyboardButton("📖 Инструкция"),
-    KeyboardButton("👤 Профиль")  # Кнопка Профиль
+    KeyboardButton("👤 Профиль")
 )
 
 voice_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -61,6 +61,9 @@ back_kb.add(KeyboardButton("⬅️ Назад"))
 
 instruction_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 instruction_kb.add(KeyboardButton("⬅️ Назад"))
+
+profile_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+profile_kb.add(KeyboardButton("⬅️ Назад"))
 
 # --- Переменные ---
 selected_voice = {}
@@ -171,6 +174,11 @@ async def vc_request(message: types.Message):
 async def instruction(message: types.Message):
     await message.answer(instruction_text, reply_markup=instruction_kb)
 
+@dp.message_handler(lambda msg: msg.text == "👤 Профиль")
+async def profile(message: types.Message):
+    user_id = message.from_user.id
+    await message.answer(f"Ваш ID: {user_id}", reply_markup=profile_kb)
+
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
     await message.answer("Выбери действие:", reply_markup=main_kb)
@@ -233,12 +241,52 @@ async def handle_text(message: types.Message):
 
     await status.delete()
 
-# --- Обработчик кнопки "Профиль" ---
-@dp.message_handler(lambda msg: msg.text == "👤 Профиль")
-async def profile(message: types.Message):
-    user_id = message.from_user.id
-    await message.answer(f"Ваш ID: {user_id}", reply_markup=main_kb)
+@dp.message_handler(content_types=['voice'])
+async def handle_voice(message: types.Message):
+    voice = selected_voice.get(message.from_user.id)
+    if not voice:
+        await message.answer("Сначала выбери голос для замены.")
+        return
+
+    # Проверка длительности голосового сообщения
+    voice_duration = message.voice.duration  # Длительность в секундах
+    if is_voice_too_long(voice_duration):
+        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
+        return
+
+    status = await message.answer("⌛ Заменяю голос...")
+
+    file_info = await bot.get_file(message.voice.file_id)
+    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_info.file_path}"
+    voice_data = requests.get(file_url).content
+
+    headers = { 'xi-api-key': API_KEY }
+    files = { 'audio': ('voice_message.ogg', voice_data, 'audio/ogg') }
+
+    voice_map = {
+        "Денис": VOICE_ID_DENIS,
+        "Олег": VOICE_ID_OGE,
+        "Аня": VOICE_ID_ANYA,
+        "Вика": VOICE_ID_VIKA
+    }
+
+    response = requests.post(
+        f"https://api.elevenlabs.io/v1/speech-to-speech/{voice_map[voice]}",
+        headers=headers,
+        files=files
+    )
+
+    if response.status_code == 200:
+        with open('converted.mp3', 'wb') as f:
+            f.write(response.content)
+        with open('converted.mp3', 'rb') as f:
+            await bot.send_voice(chat_id=message.chat.id, voice=f)
+    else:
+        await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
+
+    await status.delete()
 
 # --- Запуск ---
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
+
