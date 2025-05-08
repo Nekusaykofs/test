@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 # --- Настройки ---
 API_KEY = os.getenv("ELEVEN_API_KEY")
 API_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 6728899517
+ADMIN_ID = 7387514611
 
 VOICE_ID_DENIS = '0BcDz9UPwL3MpsnTeUlO'  # Денис
 VOICE_ID_OGE = 'MWyJiWDobXN8FX3CJTdE'    # Олег
