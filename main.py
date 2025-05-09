@@ -178,9 +178,14 @@ async def instruction(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute("SELECT voice_count FROM users WHERE id = %s", (user_id,))
-    result = cursor.fetchone()
-    count = result[0] if result else 0
+    try:
+        cursor.execute("SELECT voice_count FROM users WHERE id = %s", (user_id,))
+        result = cursor.fetchone()
+        count = result[0] if result else 0
+    except Exception as e:
+        print(f"Ошибка при получении данных пользователя: {e}")
+        await message.answer("Произошла ошибка при получении информации о вашем профиле.")
+        return
 
     text = f"👤 Ваш ID: {user_id}\n🎙 Использовано голосовых сообщений: {count}"
     await message.answer(text, reply_markup=profile_kb)
@@ -232,75 +237,25 @@ async def handle_text(message: types.Message):
     }
 
     response = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_map[voice]}",
+        f'https://api.elevenlabs.io/v1/text-to-speech/{voice_map[voice]}',
         headers=headers,
         json=data
     )
 
     if response.status_code == 200:
-        with open('output.mp3', 'wb') as f:
-            f.write(response.content)
-        with open('output.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-        
-        # Увеличиваем voice_count
-        cursor.execute("UPDATE users SET voice_count = voice_count + 1 WHERE id = %s", (message.from_user.id,))
-        conn.commit()
+        audio_url = response.json().get('audio_url')
+        await bot.send_audio(message.chat.id, audio_url)
+        user_id = message.from_user.id
+        try:
+            cursor.execute("UPDATE users SET voice_count = voice_count + 1 WHERE id = %s", (user_id,))
+            conn.commit()
+        except Exception as e:
+            print(f"Ошибка при обновлении данных пользователя: {e}")
     else:
-        await message.answer(f"Ошибка озвучивания: {response.status_code}")
+        await status.edit_text("Произошла ошибка при озвучивании текста.")
+        print(f"Ошибка: {response.status_code}, {response.text}")
 
-    await status.delete()
-
-@dp.message_handler(content_types=['voice'])
-async def handle_voice(message: types.Message):
-    voice = selected_voice.get(message.from_user.id)
-    if not voice:
-        await message.answer("Сначала выбери голос для замены.")
-        return
-
-    # Проверка длительности голосового сообщения
-    voice_duration = message.voice.duration  # Длительность в секундах
-    if is_voice_too_long(voice_duration):
-        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
-        return
-
-    status = await message.answer("⌛ Заменяю голос...")
-
-    file_info = await bot.get_file(message.voice.file_id)
-    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_info.file_path}"
-    voice_data = requests.get(file_url).content
-
-    headers = { 'xi-api-key': API_KEY }
-    files = { 'audio': ('voice_message.ogg', voice_data, 'audio/ogg') }
-
-    voice_map = {
-        "Денис": VOICE_ID_DENIS,
-        "Олег": VOICE_ID_OGE,
-        "Аня": VOICE_ID_ANYA,
-        "Вика": VOICE_ID_VIKA
-    }
-
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/voice-conversion/{voice_map[voice]}",
-        headers=headers,
-        files=files
-    )
-
-    if response.status_code == 200:
-        with open('output.mp3', 'wb') as f:
-            f.write(response.content)
-        with open('output.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-
-        # Увеличиваем voice_count
-        cursor.execute("UPDATE users SET voice_count = voice_count + 1 WHERE id = %s", (message.from_user.id,))
-        conn.commit()
-    else:
-        await message.answer(f"Ошибка замены голоса: {response.status_code}")
-
-    await status.delete()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
 
 
