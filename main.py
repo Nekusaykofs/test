@@ -12,10 +12,10 @@ API_KEY = os.getenv("ELEVEN_API_KEY")
 API_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 6728899517
 
-VOICE_ID_DENIS = '0BcDz9UPwL3MpsnTeUlO'  # Денис
-VOICE_ID_OGE = 'MWyJiWDobXN8FX3CJTdE'    # Олег
-VOICE_ID_ANYA = 'rxEz5E7hIAPk7D3bXwf6'   # Аня
-VOICE_ID_VIKA = '8M81RK3MD7u4DOJpu2G5'   # Вика
+VOICE_ID_DENIS = '0BcDz9UPwL3MpsnTeUlO'
+VOICE_ID_OGE = 'MWyJiWDobXN8FX3CJTdE'
+VOICE_ID_ANYA = 'rxEz5E7hIAPk7D3bXwf6'
+VOICE_ID_VIKA = '8M81RK3MD7u4DOJpu2G5'
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
@@ -34,7 +34,7 @@ cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
-        voice_message_count INTEGER DEFAULT 0
+        used_voice_msgs INT DEFAULT 0
     )
 ''')
 conn.commit()
@@ -42,7 +42,7 @@ conn.commit()
 # --- Клавиатуры ---
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 main_kb.add(
-    KeyboardButton("🗣 Озвучить текст"),
+    KeyboardButton("🔣 Озвучить текст"),
     KeyboardButton("🎧 Заменить голос"),
     KeyboardButton("📖 Инструкция"),
     KeyboardButton("👤 Профиль")
@@ -84,7 +84,7 @@ def get_emotion_settings(text):
     if max(happy_count, sad_count, angry_count, warm_count) == 0:
         return 0.5, 0.75
 
-    mood = max([ 
+    mood = max([
         (happy_count, (0.3, 0.9)),
         (sad_count, (0.7, 0.5)),
         (angry_count, (0.8, 0.6)),
@@ -95,7 +95,7 @@ def get_emotion_settings(text):
 
 instruction_text = (
     "📖 Инструкция по использованию бота:\n\n"
-    "1. 🗣 *Озвучивание текста:*\n"
+    "1. 🔣 *Озвучивание текста:*\n"
     "   • Нажми кнопку \"🗣 Озвучить текст\".\n"
     "   • Выбери голос (Олег, Денис, Аня, Вика).\n"
     "   • Отправь текст (до 200 символов).\n"
@@ -108,13 +108,21 @@ instruction_text = (
     "❗️Если превысишь лимит, бот сообщит об этом.\n"
 )
 
-# --- Функция для проверки длины текста ---
+# --- Функции ---
 def is_text_too_long(text):
-    return len(text) > 200  # Ограничение на 200 символов
+    return len(text) > 200
 
-# --- Функция для проверки длительности голосового сообщения ---
 def is_voice_too_long(voice_duration):
-    return voice_duration > 15  # Ограничение на 15 секунд
+    return voice_duration > 15
+
+def increment_voice_usage(user_id):
+    cursor.execute("UPDATE users SET used_voice_msgs = used_voice_msgs + 1 WHERE id = %s", (user_id,))
+    conn.commit()
+
+def get_user_usage(user_id):
+    cursor.execute("SELECT used_voice_msgs FROM users WHERE id = %s", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else 0
 
 # --- Команды ---
 @dp.message_handler(commands=['start'])
@@ -163,15 +171,6 @@ async def users_count(message: types.Message):
     count = cursor.fetchone()[0]
     await message.answer(f"👥 Пользователей в боте: {count}")
 
-@dp.message_handler(commands=['profile'])
-async def profile_cmd(message: types.Message):
-    user_id = message.from_user.id
-    cursor.execute("SELECT voice_message_count FROM users WHERE id = %s", (user_id,))
-    result = cursor.fetchone()
-    voice_message_count = result[0] if result else 0
-
-    await message.answer(f"Ваш ID: {user_id}\nКоличество использованных голосовых сообщений: {voice_message_count}")
-
 @dp.message_handler(lambda msg: msg.text == "🗣 Озвучить текст")
 async def tts_request(message: types.Message):
     await message.answer("Выбери голос и отправь текст:", reply_markup=voice_kb)
@@ -186,7 +185,9 @@ async def instruction(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
-    await profile_cmd(message)
+    user_id = message.from_user.id
+    used_count = get_user_usage(user_id)
+    await message.answer(f"Ваш ID: {user_id}\nИспользовано голосов: {used_count}", reply_markup=profile_kb)
 
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
@@ -245,6 +246,7 @@ async def handle_text(message: types.Message):
             f.write(response.content)
         with open('output.mp3', 'rb') as f:
             await bot.send_voice(chat_id=message.chat.id, voice=f)
+        increment_voice_usage(message.from_user.id)
     else:
         await message.answer(f"Ошибка озвучивания: {response.status_code}")
 
@@ -252,14 +254,12 @@ async def handle_text(message: types.Message):
 
 @dp.message_handler(content_types=['voice'])
 async def handle_voice(message: types.Message):
-    user_id = message.from_user.id
-    voice = selected_voice.get(user_id)
+    voice = selected_voice.get(message.from_user.id)
     if not voice:
         await message.answer("Сначала выбери голос для замены.")
         return
 
-    # Проверка длительности голосового сообщения
-    voice_duration = message.voice.duration  # Длительность в секундах
+    voice_duration = message.voice.duration
     if is_voice_too_long(voice_duration):
         await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
         return
@@ -291,14 +291,7 @@ async def handle_voice(message: types.Message):
             f.write(response.content)
         with open('converted.mp3', 'rb') as f:
             await bot.send_voice(chat_id=message.chat.id, voice=f)
-
-        # Обновление счетчика голосовых сообщений
-        cursor.execute('''
-            UPDATE users
-            SET voice_message_count = voice_message_count + 1
-            WHERE id = %s
-        ''', (user_id,))
-        conn.commit()
+        increment_voice_usage(message.from_user.id)
     else:
         await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
 
@@ -307,3 +300,4 @@ async def handle_voice(message: types.Message):
 # --- Запуск ---
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
+
