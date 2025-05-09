@@ -1,10 +1,9 @@
- # --- Начало ---
 import os
 import requests
 import asyncio
 import psycopg2
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
 from urllib.parse import urlparse
 
@@ -13,15 +12,15 @@ API_KEY = os.getenv("ELEVEN_API_KEY")
 API_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 6728899517
 
-VOICE_ID_DENIS = '0BcDz9UPwL3MpsnTeUlO'
-VOICE_ID_OGE = 'MWyJiWDobXN8FX3CJTdE'
-VOICE_ID_ANYA = 'rxEz5E7hIAPk7D3bXwf6'
-VOICE_ID_VIKA = '8M81RK3MD7u4DOJpu2G5'
+VOICE_ID_DENIS = '0BcDz9UPwL3MpsnTeUlO'  # Денис
+VOICE_ID_OGE = 'MWyJiWDobXN8FX3CJTdE'    # Олег
+VOICE_ID_ANYA = 'rxEz5E7hIAPk7D3bXwf6'   # Аня
+VOICE_ID_VIKA = '8M81RK3MD7u4DOJpu2G5'   # Вика
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# --- База данных ---
+# --- База данных PostgreSQL ---
 DATABASE_URL = os.getenv("DATABASE_URL")
 url = urlparse(DATABASE_URL)
 conn = psycopg2.connect(
@@ -34,8 +33,7 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
-        id BIGINT PRIMARY KEY,
-        usage_count INTEGER DEFAULT 0
+        id BIGINT PRIMARY KEY
     )
 ''')
 conn.commit()
@@ -58,21 +56,19 @@ voice_kb.add(
     KeyboardButton("⬅️ Назад")
 )
 
-back_kb = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton("⬅️ Назад"))
-instruction_kb = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton("⬅️ Назад"))
-profile_kb = ReplyKeyboardMarkup(resize_keyboard=True).add(KeyboardButton("⬅️ Назад"))
+back_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+back_kb.add(KeyboardButton("⬅️ Назад"))
 
-# Inline кнопки оплаты
-payment_kb = InlineKeyboardMarkup()
-payment_kb.add(
-    InlineKeyboardButton("💳 Купить 5 голосов ($0.39)", url="https://t.me/CryptoBot?start=example_pack1"),
-    InlineKeyboardButton("💳 Купить 20 голосов ($1.30)", url="https://t.me/CryptoBot?start=example_pack2"),
-    InlineKeyboardButton("💳 Купить 50 голосов ($2.90)", url="https://t.me/CryptoBot?start=example_pack3")
-)
+instruction_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+instruction_kb.add(KeyboardButton("⬅️ Назад"))
 
-# --- Эмоции ---
+profile_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+profile_kb.add(KeyboardButton("⬅️ Назад"))
+
+# --- Переменные ---
 selected_voice = {}
 
+# --- Настройка эмоций ---
 def get_emotion_settings(text):
     happy = ['😂', '🤣', '😄']
     sad = ['😢', '😭', '💔']
@@ -87,7 +83,7 @@ def get_emotion_settings(text):
     if max(happy_count, sad_count, angry_count, warm_count) == 0:
         return 0.5, 0.75
 
-    mood = max([
+    mood = max([ 
         (happy_count, (0.3, 0.9)),
         (sad_count, (0.7, 0.5)),
         (angry_count, (0.8, 0.6)),
@@ -111,11 +107,13 @@ instruction_text = (
     "❗️Если превысишь лимит, бот сообщит об этом.\n"
 )
 
+# --- Функция для проверки длины текста ---
 def is_text_too_long(text):
-    return len(text) > 200
+    return len(text) > 200  # Ограничение на 200 символов
 
+# --- Функция для проверки длительности голосового сообщения ---
 def is_voice_too_long(voice_duration):
-    return voice_duration > 15
+    return voice_duration > 15  # Ограничение на 15 секунд
 
 # --- Команды ---
 @dp.message_handler(commands=['start'])
@@ -123,12 +121,13 @@ async def start_cmd(message: types.Message):
     user_id = message.from_user.id
     cursor.execute('INSERT INTO users (id) VALUES (%s) ON CONFLICT DO NOTHING', (user_id,))
     conn.commit()
-    await message.answer(
+
+    welcome = (
         "Добро пожаловать в бот 🎤🎧\n\n"
         "Я умею озвучивать текст разными голосами и менять голос в сообщениях.\n"
-        "Выбери действие ниже и попробуй! 😊",
-        reply_markup=main_kb
+        "Выбери действие ниже и попробуй! 😊"
     )
+    await message.answer(welcome, reply_markup=main_kb)
 
 @dp.message_handler(commands=['broadcast'])
 async def broadcast_cmd(message: types.Message):
@@ -178,19 +177,7 @@ async def instruction(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute("SELECT usage_count FROM users WHERE id = %s", (user_id,))
-    result = cursor.fetchone()
-    usage_count = result[0] if result else 0
-    remaining = max(0, 5 - usage_count)
-
-    await message.answer(
-        f"👤 Ваш ID: {user_id}\n"
-        f"🎙 Использовано озвучек: {usage_count}\n"
-        f"🎁 Осталось бесплатных: {remaining}\n\n"
-        "После 5 озвучек потребуется покупка пакета:",
-        reply_markup=profile_kb
-    )
-    await message.answer("💸 Доступные пакеты:", reply_markup=payment_kb)
+    await message.answer(f"Ваш ID: {user_id}", reply_markup=profile_kb)
 
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
@@ -212,24 +199,9 @@ async def handle_text(message: types.Message):
         await message.answer("Сначала выбери голос.")
         return
 
-    user_id = message.from_user.id
-    cursor.execute("SELECT usage_count FROM users WHERE id = %s", (user_id,))
-    result = cursor.fetchone()
-    usage_count = result[0] if result else 0
-
-    if usage_count >= 5:
-        await message.answer(
-            "❗️Вы использовали 5 бесплатных озвучек.\n"
-            "Чтобы продолжить, купите доступ:",
-            reply_markup=payment_kb
-        )
-        return
-
-    cursor.execute("UPDATE users SET usage_count = usage_count + 1 WHERE id = %s", (user_id,))
-    conn.commit()
-
     text = message.text
     stability, similarity = get_emotion_settings(text)
+
     status = await message.answer("⌛ Озвучиваю...")
 
     headers = {
@@ -276,7 +248,8 @@ async def handle_voice(message: types.Message):
         await message.answer("Сначала выбери голос для замены.")
         return
 
-    voice_duration = message.voice.duration
+    # Проверка длительности голосового сообщения
+    voice_duration = message.voice.duration  # Длительность в секундах
     if is_voice_too_long(voice_duration):
         await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
         return
