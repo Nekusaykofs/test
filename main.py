@@ -33,8 +33,7 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
-        id BIGINT PRIMARY KEY,
-        voice_count INT DEFAULT 0  -- Добавляем поле для хранения количества голосовых сообщений
+        id BIGINT PRIMARY KEY
     )
 ''')
 conn.commit()
@@ -115,15 +114,6 @@ def is_text_too_long(text):
 # --- Функция для проверки длительности голосового сообщения ---
 def is_voice_too_long(voice_duration):
     return voice_duration > 15  # Ограничение на 15 секунд
-
-# --- Функция для обновления количества голосовых сообщений ---
-def increment_voice_count(user_id):
-    cursor.execute('''
-        UPDATE users 
-        SET voice_count = voice_count + 1 
-        WHERE id = %s
-    ''', (user_id,))
-    conn.commit()
 
 # --- Команды ---
 @dp.message_handler(commands=['start'])
@@ -253,8 +243,7 @@ async def handle_text(message: types.Message):
 
 @dp.message_handler(content_types=['voice'])
 async def handle_voice(message: types.Message):
-    user_id = message.from_user.id
-    voice = selected_voice.get(user_id)
+    voice = selected_voice.get(message.from_user.id)
     if not voice:
         await message.answer("Сначала выбери голос для замены.")
         return
@@ -264,9 +253,6 @@ async def handle_voice(message: types.Message):
     if is_voice_too_long(voice_duration):
         await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
         return
-
-    # Обновляем количество использованных голосовых сообщений
-    increment_voice_count(user_id)
 
     status = await message.answer("⌛ Заменяю голос...")
 
