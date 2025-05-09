@@ -33,7 +33,8 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
-        id BIGINT PRIMARY KEY
+        id BIGINT PRIMARY KEY,
+        voice_message_count INTEGER DEFAULT 0
     )
 ''')
 conn.commit()
@@ -162,6 +163,15 @@ async def users_count(message: types.Message):
     count = cursor.fetchone()[0]
     await message.answer(f"👥 Пользователей в боте: {count}")
 
+@dp.message_handler(commands=['profile'])
+async def profile_cmd(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT voice_message_count FROM users WHERE id = %s", (user_id,))
+    result = cursor.fetchone()
+    voice_message_count = result[0] if result else 0
+
+    await message.answer(f"Ваш ID: {user_id}\nКоличество использованных голосовых сообщений: {voice_message_count}")
+
 @dp.message_handler(lambda msg: msg.text == "🗣 Озвучить текст")
 async def tts_request(message: types.Message):
     await message.answer("Выбери голос и отправь текст:", reply_markup=voice_kb)
@@ -176,8 +186,7 @@ async def instruction(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
-    user_id = message.from_user.id
-    await message.answer(f"Ваш ID: {user_id}", reply_markup=profile_kb)
+    await profile_cmd(message)
 
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
@@ -243,7 +252,8 @@ async def handle_text(message: types.Message):
 
 @dp.message_handler(content_types=['voice'])
 async def handle_voice(message: types.Message):
-    voice = selected_voice.get(message.from_user.id)
+    user_id = message.from_user.id
+    voice = selected_voice.get(user_id)
     if not voice:
         await message.answer("Сначала выбери голос для замены.")
         return
@@ -281,6 +291,14 @@ async def handle_voice(message: types.Message):
             f.write(response.content)
         with open('converted.mp3', 'rb') as f:
             await bot.send_voice(chat_id=message.chat.id, voice=f)
+
+        # Обновление счетчика голосовых сообщений
+        cursor.execute('''
+            UPDATE users
+            SET voice_message_count = voice_message_count + 1
+            WHERE id = %s
+        ''', (user_id,))
+        conn.commit()
     else:
         await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
 
@@ -289,4 +307,3 @@ async def handle_voice(message: types.Message):
 # --- Запуск ---
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
-
