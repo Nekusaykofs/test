@@ -33,7 +33,8 @@ conn = psycopg2.connect(
 cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
-        id BIGINT PRIMARY KEY
+        id BIGINT PRIMARY KEY,
+        free_messages_used INTEGER DEFAULT 0
     )
 ''')
 conn.commit()
@@ -164,10 +165,28 @@ async def users_count(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text == "🗣 Озвучить текст")
 async def tts_request(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
+    used = cursor.fetchone()
+    used = used[0] if used else 0
+
+    if used >= 5:
+        await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
+        return
+
     await message.answer("Выбери голос и отправь текст:", reply_markup=voice_kb)
 
 @dp.message_handler(lambda msg: msg.text == "🎧 Заменить голос")
 async def vc_request(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
+    used = cursor.fetchone()
+    used = used[0] if used else 0
+
+    if used >= 5:
+        await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
+        return
+
     await message.answer("Выбери голос для замены и отправь голосовое:", reply_markup=voice_kb)
 
 @dp.message_handler(lambda msg: msg.text == "📖 Инструкция")
@@ -192,7 +211,6 @@ async def profile(message: types.Message):
         reply_markup=profile_kb
     )
 
-
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
     await message.answer("Выбери действие:", reply_markup=main_kb)
@@ -206,6 +224,15 @@ async def handle_voice_choice(message: types.Message):
 async def handle_text(message: types.Message):
     if is_text_too_long(message.text):
         await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 200 символов.")
+        return
+
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
+    used = cursor.fetchone()
+    used = used[0] if used else 0
+
+    if used >= 5:
+        await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
         return
 
     voice = selected_voice.get(message.from_user.id)
@@ -250,6 +277,9 @@ async def handle_text(message: types.Message):
             f.write(response.content)
         with open('output.mp3', 'rb') as f:
             await bot.send_voice(chat_id=message.chat.id, voice=f)
+        
+        cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
+        conn.commit()
     else:
         await message.answer(f"Ошибка озвучивания: {response.status_code}")
 
@@ -266,6 +296,15 @@ async def handle_voice(message: types.Message):
     voice_duration = message.voice.duration  # Длительность в секундах
     if is_voice_too_long(voice_duration):
         await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
+        return
+
+    user_id = message.from_user.id
+    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
+    used = cursor.fetchone()
+    used = used[0] if used else 0
+
+    if used >= 5:
+        await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
         return
 
     status = await message.answer("⌛ Заменяю голос...")
@@ -295,6 +334,9 @@ async def handle_voice(message: types.Message):
             f.write(response.content)
         with open('converted.mp3', 'rb') as f:
             await bot.send_voice(chat_id=message.chat.id, voice=f)
+
+        cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
+        conn.commit()
     else:
         await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
 
