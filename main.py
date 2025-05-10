@@ -34,7 +34,8 @@ cursor = conn.cursor()
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id BIGINT PRIMARY KEY,
-        free_messages_used INTEGER DEFAULT 0
+        free_messages_used INTEGER DEFAULT 0,
+        voice_balance INTEGER DEFAULT 0
     )
 ''')
 conn.commit()
@@ -117,7 +118,6 @@ def is_voice_too_long(voice_duration):
     return voice_duration > 15  # Ограничение на 15 секунд
 
 # --- Команды ---
-# --- Команды ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
@@ -167,11 +167,12 @@ async def users_count(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "🗣 Озвучить текст")
 async def tts_request(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
-    used = cursor.fetchone()
-    used = used[0] if used else 0
+    cursor.execute("SELECT free_messages_used, voice_balance FROM users WHERE id = %s", (user_id,))
+    used, voice_balance = cursor.fetchone()
+    used = used if used else 0
+    voice_balance = voice_balance if voice_balance else 0
 
-    if used >= 5:
+    if used >= 5 and voice_balance == 0:
         await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
         return
 
@@ -180,11 +181,12 @@ async def tts_request(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "🎧 Заменить голос")
 async def vc_request(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
-    used = cursor.fetchone()
-    used = used[0] if used else 0
+    cursor.execute("SELECT free_messages_used, voice_balance FROM users WHERE id = %s", (user_id,))
+    used, voice_balance = cursor.fetchone()
+    used = used if used else 0
+    voice_balance = voice_balance if voice_balance else 0
 
-    if used >= 5:
+    if used >= 5 and voice_balance == 0:
         await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
         return
 
@@ -197,18 +199,19 @@ async def instruction(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
+    cursor.execute("SELECT free_messages_used, voice_balance FROM users WHERE id = %s", (user_id,))
     result = cursor.fetchone()
 
     if result is not None:
-        used = result[0]
+        used, balance = result
     else:
-        used = 0
+        used, balance = 0, 0
 
     await message.answer(
         f"👤 Ваш профиль:\n\n"
         f"ID: {user_id}\n"
-        f"Бесплатных сообщений использовано: {used}/5",
+        f"Бесплатных сообщений использовано: {used}/5\n"
+        f"Баланс голосовых сообщений: {balance}",
         reply_markup=profile_kb
     )
 
@@ -228,11 +231,12 @@ async def handle_text(message: types.Message):
         return
 
     user_id = message.from_user.id
-    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
-    used = cursor.fetchone()
-    used = used[0] if used else 0
+    cursor.execute("SELECT free_messages_used, voice_balance FROM users WHERE id = %s", (user_id,))
+    used, voice_balance = cursor.fetchone()
+    used = used if used else 0
+    voice_balance = voice_balance if voice_balance else 0
 
-    if used >= 5:
+    if used >= 5 and voice_balance == 0:
         await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
         return
 
@@ -300,11 +304,12 @@ async def handle_voice(message: types.Message):
         return
 
     user_id = message.from_user.id
-    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
-    used = cursor.fetchone()
-    used = used[0] if used else 0
+    cursor.execute("SELECT free_messages_used, voice_balance FROM users WHERE id = %s", (user_id,))
+    used, voice_balance = cursor.fetchone()
+    used = used if used else 0
+    voice_balance = voice_balance if voice_balance else 0
 
-    if used >= 5:
+    if used >= 5 and voice_balance == 0:
         await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
         return
 
@@ -339,11 +344,10 @@ async def handle_voice(message: types.Message):
         cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
         conn.commit()
     else:
-        await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
+        await message.answer(f"Ошибка замены: {response.status_code}")
 
     await status.delete()
 
-
-# --- Запуск ---
-if __name__ == '__main__':
+if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
+
