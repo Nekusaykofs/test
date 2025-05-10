@@ -65,6 +65,13 @@ instruction_kb.add(KeyboardButton("⬅️ Назад"))
 
 profile_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 profile_kb.add(KeyboardButton("⬅️ Назад"))
+profile_kb.add(KeyboardButton("💳 Купить пакеты голосовых"))
+
+purchase_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+purchase_kb.add(
+    KeyboardButton("💳 Купить пакеты голосовых"),
+    KeyboardButton("⬅️ Назад")
+)
 
 # --- Переменные ---
 selected_voice = {}
@@ -275,74 +282,61 @@ async def handle_text(message: types.Message):
     if response.status_code == 200:
         with open('output.mp3', 'wb') as f:
             f.write(response.content)
-        with open('output.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-        
+        await bot.send_audio(message.chat.id, open('output.mp3', 'rb'))
+
         cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
         conn.commit()
     else:
-        await message.answer(f"Ошибка озвучивания: {response.status_code}")
-
+        await message.answer("Ошибка при озвучивании текста.")
     await status.delete()
 
-@dp.message_handler(content_types=['voice'])
-async def handle_voice(message: types.Message):
-    voice = selected_voice.get(message.from_user.id)
-    if not voice:
-        await message.answer("Сначала выбери голос для замены.")
-        return
-
-    # Проверка длительности голосового сообщения
-    voice_duration = message.voice.duration  # Длительность в секундах
-    if is_voice_too_long(voice_duration):
-        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
-        return
-
+@dp.message_handler(lambda msg: msg.text == "💳 Купить пакеты голосовых")
+async def purchase(message: types.Message):
     user_id = message.from_user.id
     cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
-    used = cursor.fetchone()
-    used = used[0] if used else 0
+    result = cursor.fetchone()
 
-    if used >= 5:
-        await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
-        return
-
-    status = await message.answer("⌛ Заменяю голос...")
-
-    file_info = await bot.get_file(message.voice.file_id)
-    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_info.file_path}"
-    voice_data = requests.get(file_url).content
-
-    headers = { 'xi-api-key': API_KEY }
-    files = { 'audio': ('voice_message.ogg', voice_data, 'audio/ogg') }
-
-    voice_map = {
-        "Денис": VOICE_ID_DENIS,
-        "Олег": VOICE_ID_OGE,
-        "Аня": VOICE_ID_ANYA,
-        "Вика": VOICE_ID_VIKA
-    }
-
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/speech-to-speech/{voice_map[voice]}",
-        headers=headers,
-        files=files
-    )
-
-    if response.status_code == 200:
-        with open('converted.mp3', 'wb') as f:
-            f.write(response.content)
-        with open('converted.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-
-        cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
-        conn.commit()
+    if result is not None:
+        used = result[0]
     else:
-        await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
+        used = 0
 
-    await status.delete()
+    # Информация о пакетах
+    packages = [
+        ("5 голосовых сообщений", "$0.39"),
+        ("20 голосовых сообщений", "$1.3"),
+        ("50 голосовых сообщений", "$2.9")
+    ]
 
-# --- Запуск ---
+    package_text = "Выберите пакет для покупки:\n\n"
+    for idx, (count, price) in enumerate(packages, 1):
+        package_text += f"{idx}. {count} — {price}\n"
+
+    await message.answer(package_text, reply_markup=purchase_kb)
+
+@dp.message_handler(lambda msg: msg.text in ["1", "2", "3"])
+async def handle_purchase(message: types.Message):
+    user_id = message.from_user.id
+    # Здесь добавьте логику для интеграции с платежной системой (например, CryptoBot)
+    if msg.text == "1":
+        # Допустим, пользователь выбрал пакет за $0.39
+        additional_messages = 5
+        price = "$0.39"
+    elif msg.text == "2":
+        # Пакет за $1.3
+        additional_messages = 20
+        price = "$1.3"
+    elif msg.text == "3":
+        # Пакет за $2.9
+        additional_messages = 50
+        price = "$2.9"
+
+    # Обновление базы данных: добавление голосовых сообщений
+    cursor.execute("UPDATE users SET free_messages_used = free_messages_used + %s WHERE id = %s", (additional_messages, user_id))
+    conn.commit()
+
+    await message.answer(f"Вы приобрели пакет {additional_messages} голосовых сообщений за {price}. Ваш баланс обновлён.", reply_markup=main_kb)
+
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
 
