@@ -117,6 +117,7 @@ def is_voice_too_long(voice_duration):
     return voice_duration > 15  # Ограничение на 15 секунд
 
 # --- Команды ---
+# --- Команды ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
@@ -341,6 +342,7 @@ async def handle_voice(message: types.Message):
         await message.answer(f"Ошибка замены: {response.status_code}, {response.text}")
 
     await status.delete()
+
 
 # --- Запуск ---
 if __name__ == '__main__':
