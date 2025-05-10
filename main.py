@@ -177,7 +177,21 @@ async def instruction(message: types.Message):
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
     user_id = message.from_user.id
-    await message.answer(f"Ваш ID: {user_id}", reply_markup=profile_kb)
+    cursor.execute("SELECT free_messages_used FROM users WHERE id = %s", (user_id,))
+    result = cursor.fetchone()
+
+    if result is not None:
+        used = result[0]
+    else:
+        used = 0
+
+    await message.answer(
+        f"👤 Ваш профиль:\n\n"
+        f"ID: {user_id}\n"
+        f"Бесплатных сообщений использовано: {used}/5",
+        reply_markup=profile_kb
+    )
+
 
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
