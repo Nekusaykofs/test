@@ -220,6 +220,7 @@ def check_payment_status(invoice_id):
         logging.error(f"Ошибка при запросе к API: {response.status_code}, {response.text}")
         return None
 
+...
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("check_"))
 async def check_invoice(call: types.CallbackQuery):
     invoice_id = call.data.split("check_")[1]
@@ -237,12 +238,12 @@ async def check_invoice(call: types.CallbackQuery):
             logging.info(f"✅ Найден инвойс: {invoice}")
             status = invoice['status']
             if status == 'paid':
-                user_id, amount = pending_invoices.get(str(invoice_id), (None, None))
+                user_id, amount = pending_invoices.get(int(invoice_id), (None, None))
                 if user_id and amount:
                     cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (amount, user_id))
                     conn.commit()
                     await call.message.answer(f"✅ Оплата подтверждена. Вам начислено {amount} голосов!")
-                    del pending_invoices[str(invoice_id)]
+                    del pending_invoices[int(invoice_id)]
                     return
             elif status in ['active', 'processing']:
                 await call.message.answer("💬 Платёж найден, но ещё обрабатывается. Попробуйте чуть позже.")
@@ -251,6 +252,7 @@ async def check_invoice(call: types.CallbackQuery):
             logging.warning(f"‼️ Инвойс с ID {invoice_id} не найден среди {len(invoices)} инвойсов.")
 
     await call.message.answer("❌ Оплата не найдена или ещё не завершена. Попробуйте позже.")
+
 
 
 
