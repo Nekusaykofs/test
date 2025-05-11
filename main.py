@@ -46,7 +46,8 @@ main_kb.add(
     KeyboardButton("🗣 Озвучить текст"),
     KeyboardButton("🎧 Заменить голос"),
     KeyboardButton("📖 Инструкция"),
-    KeyboardButton("👤 Профиль")
+    KeyboardButton("👤 Профиль"),
+    KeyboardButton("💰 Купить голосовые")  # Добавлена кнопка для покупки голосовых
 )
 
 voice_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -66,6 +67,15 @@ instruction_kb.add(KeyboardButton("⬅️ Назад"))
 
 profile_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 profile_kb.add(KeyboardButton("⬅️ Назад"))
+
+# Клавиатура для покупки голосов
+purchase_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+purchase_kb.add(
+    KeyboardButton("Купить 5 голосов"),
+    KeyboardButton("Купить 20 голосов"),
+    KeyboardButton("Купить 50 голосов"),
+    KeyboardButton("⬅️ Назад")
+)
 
 # --- Переменные ---
 selected_voice = {}
@@ -215,16 +225,36 @@ async def profile(message: types.Message):
         reply_markup=profile_kb
     )
 
+@dp.message_handler(lambda msg: msg.text == "💰 Купить голосовые")
+async def buy_voices(message: types.Message):
+    await message.answer("Выберите количество голосовых сообщений для пополнения:", reply_markup=purchase_kb)
+
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
     await message.answer("Выбери действие:", reply_markup=main_kb)
+
+@dp.message_handler(lambda msg: msg.text in ["Купить 5 голосов", "Купить 20 голосов", "Купить 50 голосов"])
+async def handle_purchase(message: types.Message):
+    user_id = message.from_user.id
+    purchase_amount = 0
+
+    if message.text == "Купить 5 голосов":
+        purchase_amount = 5
+    elif message.text == "Купить 20 голосов":
+        purchase_amount = 20
+    elif message.text == "Купить 50 голосов":
+        purchase_amount = 50
+
+    cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (purchase_amount, user_id))
+    conn.commit()
+    await message.answer(f"Вы пополнили баланс на {purchase_amount} голосовых сообщений.", reply_markup=main_kb)
 
 @dp.message_handler(lambda msg: msg.text in ["Денис", "Олег", "Аня", "Вика"])
 async def handle_voice_choice(message: types.Message):
     selected_voice[message.from_user.id] = message.text
     await message.answer(f"Выбран голос: {message.text}. Отправь текст:", reply_markup=back_kb)
 
-@dp.message_handler(lambda msg: msg.text not in ["🗣 Озвучить текст", "🎧 Заменить голос", "⬅️ Назад", "Денис", "Олег", "Аня", "Вика", "📖 Инструкция", "👤 Профиль"])
+@dp.message_handler(lambda msg: msg.text not in ["🗣 Озвучить текст", "🎧 Заменить голос", "⬅️ Назад", "Денис", "Олег", "Аня", "Вика", "📖 Инструкция", "👤 Профиль", "💰 Купить голосовые"])
 async def handle_text(message: types.Message):
     if is_text_too_long(message.text):
         await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 200 символов.")
@@ -271,83 +301,31 @@ async def handle_text(message: types.Message):
         "Вика": VOICE_ID_VIKA
     }
 
+    voice_id = voice_map.get(voice)
+    if voice_id:
+        data['voice_id'] = voice_id
+    else:
+        await message.answer("Не удалось выбрать голос.")
+        return
+
     response = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_map[voice]}",
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers=headers,
         json=data
     )
 
     if response.status_code == 200:
-        with open('output.mp3', 'wb') as f:
-            f.write(response.content)
-        with open('output.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-        
+        audio_url = response.json()["audio_url"]
+        audio_content = requests.get(audio_url).content
+        await bot.send_voice(message.chat.id, audio_content, reply_markup=main_kb)
         cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
         conn.commit()
     else:
-        await message.answer(f"Ошибка озвучивания: {response.status_code}")
-
-    await status.delete()
-
-@dp.message_handler(content_types=['voice'])
-async def handle_voice(message: types.Message):
-    voice = selected_voice.get(message.from_user.id)
-    if not voice:
-        await message.answer("Сначала выбери голос для замены.")
-        return
-
-    # Проверка длительности голосового сообщения
-    voice_duration = message.voice.duration  # Длительность в секундах
-    if is_voice_too_long(voice_duration):
-        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
-        return
-
-    user_id = message.from_user.id
-    cursor.execute("SELECT free_messages_used, voice_balance FROM users WHERE id = %s", (user_id,))
-    used, voice_balance = cursor.fetchone()
-    used = used if used else 0
-    voice_balance = voice_balance if voice_balance else 0
-
-    if used >= 5 and voice_balance == 0:
-        await message.answer("Вы использовали 5 бесплатных голосовых. Пополните баланс, чтобы продолжить.")
-        return
-
-    status = await message.answer("⌛ Заменяю голос...")
-
-    file_info = await bot.get_file(message.voice.file_id)
-    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_info.file_path}"
-    voice_data = requests.get(file_url).content
-
-    headers = { 'xi-api-key': API_KEY }
-    files = { 'audio': ('voice_message.ogg', voice_data, 'audio/ogg') }
-
-    voice_map = {
-        "Денис": VOICE_ID_DENIS,
-        "Олег": VOICE_ID_OGE,
-        "Аня": VOICE_ID_ANYA,
-        "Вика": VOICE_ID_VIKA
-    }
-
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/speech-to-speech/{voice_map[voice]}",
-        headers=headers,
-        files=files
-    )
-
-    if response.status_code == 200:
-        with open('converted.mp3', 'wb') as f:
-            f.write(response.content)
-        with open('converted.mp3', 'rb') as f:
-            await bot.send_voice(chat_id=message.chat.id, voice=f)
-
-        cursor.execute("UPDATE users SET free_messages_used = free_messages_used + 1 WHERE id = %s", (user_id,))
-        conn.commit()
-    else:
-        await message.answer(f"Ошибка замены: {response.status_code}")
-
+        await message.answer(f"Ошибка: {response.json().get('message')}")
+    
     await status.delete()
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
+
 
