@@ -3,13 +3,14 @@ import requests
 import asyncio
 import psycopg2
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 from urllib.parse import urlparse
 
 # --- Настройки ---
 API_KEY = os.getenv("ELEVEN_API_KEY")
 API_TOKEN = os.getenv("BOT_TOKEN")
+CRYPTOBOT_API_TOKEN = os.getenv("CRYPTOBOT_API_TOKEN")
 ADMIN_ID = 6728899517
 
 VOICE_ID_DENIS = '0BcDz9UPwL3MpsnTeUlO'
@@ -45,7 +46,8 @@ main_kb.add(
     KeyboardButton("🗣 Озвучить текст"),
     KeyboardButton("🎧 Заменить голос"),
     KeyboardButton("📖 Инструкция"),
-    KeyboardButton("👤 Профиль")
+    KeyboardButton("👤 Профиль"),
+    KeyboardButton("💰 Купить голосовые")
 )
 
 voice_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -64,7 +66,31 @@ instruction_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 instruction_kb.add(KeyboardButton("⬅️ Назад"))
 
 selected_voice = {}
+pending_invoices = {}
 
+# --- Оплата через CryptoBot ---
+def get_pay_link(amount):
+    headers = {"Crypto-Pay-API-Token": CRYPTOBOT_API_TOKEN}
+    data = {"asset": "USDT", "amount": amount}
+    response = requests.post('https://pay.crypt.bot/api/createInvoice', headers=headers, json=data)
+    if response.ok:
+        response_data = response.json()
+        return response_data['result']['pay_url'], response_data['result']['invoice_id']
+    return None, None
+
+def check_payment_status(invoice_id):
+    headers = {
+        "Crypto-Pay-API-Token": CRYPTOBOT_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+    response = requests.post('https://pay.crypt.bot/api/getInvoices', headers=headers, json={})
+    if response.ok:
+        return response.json()
+    else:
+        print(f"Ошибка при запросе к API: {response.status_code}, {response.text}")
+        return None
+
+# --- Эмоции ---
 def get_emotion_settings(text):
     happy = ['😂', '🤣', '😄']
     sad = ['😢', '😭', '💔']
@@ -109,18 +135,13 @@ def is_text_too_long(text):
 def is_voice_too_long(voice_duration):
     return voice_duration > 15
 
+# --- Команды ---
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
     cursor.execute('INSERT INTO users (id, voice_balance) VALUES (%s, %s) ON CONFLICT DO NOTHING', (user_id, 5))
     conn.commit()
-
-    welcome = (
-        "Добро пожаловать в бот 🎤🎧\n\n"
-        "Я умею озвучивать текст разными голосами и менять голос в сообщениях.\n"
-        "Выбери действие ниже и попробуй! 😊"
-    )
-    await message.answer(welcome, reply_markup=main_kb)
+    await message.answer("Добро пожаловать в бот 🎤🎧\n\nВыбери действие:", reply_markup=main_kb)
 
 @dp.message_handler(lambda msg: msg.text == "👤 Профиль")
 async def profile(message: types.Message):
@@ -129,6 +150,51 @@ async def profile(message: types.Message):
     result = cursor.fetchone()
     balance = result[0] if result else 0
     await message.answer(f"👤 Ваш ID: `{user_id}`\n💬 Голосовых сообщений осталось: *{balance}*", parse_mode="Markdown")
+
+@dp.message_handler(lambda msg: msg.text == "💰 Купить голосовые")
+async def buy_voices(message: types.Message):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("Купить 5 голосов ($0.39)", callback_data="buy_5"),
+        InlineKeyboardButton("Купить 20 голосов ($1.30)", callback_data="buy_20"),
+        InlineKeyboardButton("Купить 50 голосов ($2.90)", callback_data="buy_50")
+    )
+    await message.answer("Выберите пакет:", reply_markup=markup)
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy_"))
+async def create_invoice(call: types.CallbackQuery):
+    user_id = call.from_user.id
+    package = int(call.data.split('_')[1])
+    price = {5: 0.39, 20: 1.30, 50: 2.90}.get(package)
+
+    pay_url, invoice_id = get_pay_link(str(price))
+    if pay_url:
+        pending_invoices[invoice_id] = (user_id, package)
+        markup = InlineKeyboardMarkup()
+        markup.add(
+            InlineKeyboardButton("Оплатить", url=pay_url),
+            InlineKeyboardButton("Проверить оплату", callback_data=f"check_{invoice_id}")
+        )
+        await call.message.answer("Перейдите по ссылке и оплатите. Затем нажмите \"Проверить оплату\".", reply_markup=markup)
+    else:
+        await call.message.answer("Ошибка при создании счёта. Попробуйте позже.")
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("check_"))
+async def check_invoice(call: types.CallbackQuery):
+    invoice_id = call.data.split("check_")[1]
+    info = check_payment_status(invoice_id)
+
+    if info and info.get('ok') and 'items' in info['result']:
+        invoice = next((inv for inv in info['result']['items'] if str(inv['invoice_id']) == invoice_id), None)
+        if invoice and invoice['status'] == 'paid':
+            user_id, amount = pending_invoices.get(invoice_id, (None, None))
+            if user_id and amount:
+                cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (amount, user_id))
+                conn.commit()
+                await call.message.answer(f"✅ Оплата подтверждена. Вам начислено {amount} голосов!")
+                del pending_invoices[invoice_id]
+                return
+    await call.message.answer("❌ Оплата не найдена или ещё не завершена. Попробуйте позже.")
 
 @dp.message_handler(lambda msg: msg.text == "🗣 Озвучить текст")
 async def tts_request(message: types.Message):
