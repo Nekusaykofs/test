@@ -164,6 +164,40 @@ async def buy_voices(message: types.Message):
     )
     await message.answer("Выберите пакет:", reply_markup=markup)
 
+@dp.message_handler(commands=['broadcast'])
+async def broadcast_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Нет прав.")
+        return
+
+    text = message.text.replace("/broadcast", "").strip()
+    if not text:
+        await message.answer("Добавь текст после команды.")
+        return
+
+    cursor.execute("SELECT id FROM users")
+    users = cursor.fetchall()
+    sent = 0
+    for user in users:
+        try:
+            await bot.send_message(user[0], text)
+            sent += 1
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logging.warning(f"Не отправлено {user[0]}: {e}")
+    await message.answer(f"✅ Отправлено {sent} пользователям.")
+
+
+@dp.message_handler(commands=['users'])
+async def users_count(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Нет доступа.")
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+    await message.answer(f"👥 Пользователей в боте: {count}")
+
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("buy_"))
 async def create_invoice(call: types.CallbackQuery):
     user_id = call.from_user.id
