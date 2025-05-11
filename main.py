@@ -164,16 +164,16 @@ async def buy_voices(message: types.Message):
     )
     await message.answer("Выберите пакет:", reply_markup=markup)
 
-@dp.message_handler(commands=['broadcast'], content_types=types.ContentType.ANY)
+@dp.message_handler(lambda m: m.text and m.text.startswith("/broadcast") or m.caption and m.caption.startswith("/broadcast"), content_types=types.ContentType.ANY)
 async def broadcast_cmd(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("Нет доступа.")
         return
 
-    # Извлекаем текст или подпись
-    text = message.text.replace("/broadcast", "").strip() if message.text else message.caption
+    # Убираем "/broadcast" из текста или подписи
+    text = message.text.replace("/broadcast", "").strip() if message.text else message.caption.replace("/broadcast", "").strip()
     if not text:
-        await message.answer("Добавь текст или подпись к файлу.")
+        await message.answer("Добавьте текст после команды или в подпись.")
         return
 
     cursor.execute("SELECT id FROM users")
@@ -187,14 +187,19 @@ async def broadcast_cmd(message: types.Message):
                 await bot.send_photo(user_id, message.photo[-1].file_id, caption=text)
             elif message.video:
                 await bot.send_video(user_id, message.video.file_id, caption=text)
-            elif message.text:
+            elif message.document:
+                await bot.send_document(user_id, message.document.file_id, caption=text)
+            elif message.audio:
+                await bot.send_audio(user_id, message.audio.file_id, caption=text)
+            else:
                 await bot.send_message(user_id, text)
             sent += 1
             await asyncio.sleep(0.1)
         except Exception as e:
             logging.warning(f"Не отправлено {user_id}: {e}")
 
-    await message.answer(f"✅ Отправлено {sent} пользователям.")
+    await message.answer(f"✅ Рассылка завершена. Отправлено: {sent}")
+
 
 
 @dp.message_handler(commands=['users'])
