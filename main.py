@@ -185,14 +185,22 @@ async def check_invoice(call: types.CallbackQuery):
     info = check_payment_status(invoice_id)
 
     if info and info.get('ok') and 'items' in info['result']:
-        invoice = next((inv for inv in info['result']['items'] if str(inv['invoice_id']) == invoice_id), None)
-        if invoice and invoice['status'] == 'paid':
-            user_id, amount = pending_invoices.get(invoice_id, (None, None))
-            if user_id and amount:
-                cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (amount, user_id))
-                conn.commit()
-                await call.message.answer(f"✅ Оплата подтверждена. Вам начислено {amount} голосов!")
-                del pending_invoices[invoice_id]
+        print("Полученные инвойсы:", info['result']['items'])
+        print("Ищу invoice_id:", invoice_id)
+
+        invoice = next((inv for inv in info['result']['items'] if inv['invoice_id'] == int(invoice_id)), None)
+        if invoice:
+            status = invoice['status']
+            if status == 'paid':
+                user_id, amount = pending_invoices.get(str(invoice_id), (None, None))
+                if user_id and amount:
+                    cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (amount, user_id))
+                    conn.commit()
+                    await call.message.answer(f"✅ Оплата подтверждена. Вам начислено {amount} голосов!")
+                    del pending_invoices[str(invoice_id)]
+                    return
+            elif status in ['active', 'processing']:
+                await call.message.answer("💬 Платёж найден, но ещё обрабатывается. Попробуйте чуть позже.")
                 return
     await call.message.answer("❌ Оплата не найдена или ещё не завершена. Попробуйте позже.")
 
