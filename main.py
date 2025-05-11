@@ -224,13 +224,18 @@ async def profile(message: types.Message):
     else:
         used, balance = 0, 0
 
+    # Ограничиваем бесплатные сообщения до 5
+    max_free_messages = 5
+    used_display = min(used, max_free_messages)
+
     await message.answer(
         f"👤 Ваш профиль:\n\n"
         f"ID: {user_id}\n"
-        f"Бесплатных сообщений использовано: {used}/5\n"
+        f"Бесплатных сообщений использовано: {used_display}/{max_free_messages}\n"
         f"Баланс голосовых сообщений: {balance}",
         reply_markup=profile_kb
     )
+
 
 @dp.message_handler(lambda msg: msg.text == "⬅️ Назад")
 async def back_to_main(message: types.Message):
