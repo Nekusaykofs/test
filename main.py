@@ -133,10 +133,11 @@ instruction_text = (
 )
 
 def is_text_too_long(text):
-    return len(text) > 200
+    return len(text) > 120  # Было 200, стало 120 символов
 
 def is_voice_too_long(voice_duration):
-    return voice_duration > 15
+    return voice_duration > 10  # Было 15, стало 10 секунд
+
 
 # --- Команды ---
 @dp.message_handler(commands=['start'])
@@ -337,7 +338,7 @@ async def handle_text(message: types.Message):
         return
 
     if is_text_too_long(message.text):
-        await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 200 символов.")
+        await message.answer("Ваш текст слишком длинный! Пожалуйста, уменьшите его до 120 символов.")
         return
 
     voice = selected_voice.get(user_id)
@@ -400,7 +401,7 @@ async def handle_voice(message: types.Message):
         return
 
     if is_voice_too_long(message.voice.duration):
-        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 15 секундами.")
+        await message.answer("Ваше голосовое сообщение слишком длинное! Пожалуйста, ограничьте его 10 секундами.")
         return
 
     cursor.execute("SELECT voice_balance FROM users WHERE id = %s", (user_id,))
