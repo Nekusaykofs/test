@@ -208,6 +208,18 @@ def check_payment_status(invoice_id):
         logging.error(f"Ошибка при запросе к API: {response.status_code}, {response.text}")
         return None
 
+def check_payment_status(invoice_id):
+    headers = {
+        "Crypto-Pay-API-Token": CRYPTOBOT_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+    response = requests.post('https://pay.crypt.bot/api/getInvoices', headers=headers, json={})
+    if response.ok:
+        return response.json()
+    else:
+        logging.error(f"Ошибка при запросе к API: {response.status_code}, {response.text}")
+        return None
+
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("check_"))
 async def check_invoice(call: types.CallbackQuery):
     invoice_id = call.data.split("check_")[1]
@@ -217,21 +229,27 @@ async def check_invoice(call: types.CallbackQuery):
     logging.info("=== RAW RESPONSE ===")
     logging.info(json.dumps(info, indent=2, ensure_ascii=False))
 
-    if info and info.get('ok') and 'result' in info:
-        invoice = info['result']
-        logging.info(f"✅ Найден инвойс: {invoice}")
-        status = invoice['status']
-        if status == 'paid':
-            user_id, amount = pending_invoices.get(str(invoice_id), (None, None))
-            if user_id and amount:
-                cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (amount, user_id))
-                conn.commit()
-                await call.message.answer(f"✅ Оплата подтверждена. Вам начислено {amount} голосов!")
-                del pending_invoices[str(invoice_id)]
+    if info and info.get('ok') and 'items' in info['result']:
+        invoices = info['result']['items']
+        invoice = next((inv for inv in invoices if str(inv['invoice_id']) == str(invoice_id)), None)
+
+        if invoice:
+            logging.info(f"✅ Найден инвойс: {invoice}")
+            status = invoice['status']
+            if status == 'paid':
+                user_id, amount = pending_invoices.get(str(invoice_id), (None, None))
+                if user_id and amount:
+                    cursor.execute("UPDATE users SET voice_balance = voice_balance + %s WHERE id = %s", (amount, user_id))
+                    conn.commit()
+                    await call.message.answer(f"✅ Оплата подтверждена. Вам начислено {amount} голосов!")
+                    del pending_invoices[str(invoice_id)]
+                    return
+            elif status in ['active', 'processing']:
+                await call.message.answer("💬 Платёж найден, но ещё обрабатывается. Попробуйте чуть позже.")
                 return
-        elif status in ['active', 'processing']:
-            await call.message.answer("💬 Платёж найден, но ещё обрабатывается. Попробуйте чуть позже.")
-            return
+        else:
+            logging.warning(f"‼️ Инвойс с ID {invoice_id} не найден среди {len(invoices)} инвойсов.")
+
     await call.message.answer("❌ Оплата не найдена или ещё не завершена. Попробуйте позже.")
 
 
