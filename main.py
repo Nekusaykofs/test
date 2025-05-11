@@ -1,4 +1,7 @@
 import os
+import logging
+logging.basicConfig(level=logging.INFO)
+
 import requests
 import asyncio
 import psycopg2
@@ -192,18 +195,31 @@ def check_payment_status(invoice_id):
         print(f"Ошибка при запросе к API: {response.status_code}, {response.text}")
         return None
 
+def check_payment_status(invoice_id):
+    headers = {
+        "Crypto-Pay-API-Token": CRYPTOBOT_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+    data = {"invoice_id": int(invoice_id)}
+    response = requests.post('https://pay.crypt.bot/api/getInvoice', headers=headers, json=data)
+    if response.ok:
+        return response.json()
+    else:
+        logging.error(f"Ошибка при запросе к API: {response.status_code}, {response.text}")
+        return None
+
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("check_"))
 async def check_invoice(call: types.CallbackQuery):
     invoice_id = call.data.split("check_")[1]
     info = check_payment_status(invoice_id)
 
     import json
-    print("=== RAW RESPONSE ===")
-    print(json.dumps(info, indent=2, ensure_ascii=False))
+    logging.info("=== RAW RESPONSE ===")
+    logging.info(json.dumps(info, indent=2, ensure_ascii=False))
 
     if info and info.get('ok') and 'result' in info:
         invoice = info['result']
-        print(f"✅ Найден инвойс: {invoice}")
+        logging.info(f"✅ Найден инвойс: {invoice}")
         status = invoice['status']
         if status == 'paid':
             user_id, amount = pending_invoices.get(str(invoice_id), (None, None))
@@ -217,6 +233,7 @@ async def check_invoice(call: types.CallbackQuery):
             await call.message.answer("💬 Платёж найден, но ещё обрабатывается. Попробуйте чуть позже.")
             return
     await call.message.answer("❌ Оплата не найдена или ещё не завершена. Попробуйте позже.")
+
 
 
 @dp.message_handler(lambda msg: msg.text == "🗣 Озвучить текст")
