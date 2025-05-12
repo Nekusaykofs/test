@@ -157,13 +157,21 @@ async def profile(message: types.Message):
 
 @dp.message_handler(lambda msg: msg.text == "💰 Купить голосовые")
 async def buy_voices(message: types.Message):
+    text = (
+        "💰 *Пакеты голосов:*\n"
+        "• 5 голосов — $0.39\n"
+        "• 20 голосов — $1.30\n"
+        "• 50 голосов — $2.90\n\n"
+        "Выберите нужный пакет:"
+    )
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("Купить 5 голосов ($0.39)", callback_data="buy_5"),
         InlineKeyboardButton("Купить 20 голосов ($1.30)", callback_data="buy_20"),
         InlineKeyboardButton("Купить 50 голосов ($2.90)", callback_data="buy_50")
     )
-    await message.answer("Выберите пакет:", reply_markup=markup)
+    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
 
 @dp.message_handler(lambda m: m.text and m.text.startswith("/broadcast") or m.caption and m.caption.startswith("/broadcast"), content_types=types.ContentType.ANY)
 async def broadcast_cmd(message: types.Message):
